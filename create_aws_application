@@ -6,7 +6,7 @@ ENVIRONMENTS=(master develop testing)
 # region where you want to create the bucket
 REGION=eu-central-1
 # aws-cli profile to use (default default)
-PROFILE=${2:-default}
+AWS_PROFILE_CHOOSE=${2:-default}
 # policy name (default UserBucketFullControl)
 USERS_POLICY_NAME=${3:-UserBucketFullControl}
 
@@ -35,10 +35,10 @@ create_policy() {
 }
 
 create_environment() {
+  BUCKET_NAME=$1
   USER_NAME=$1
-  echo "user_name = $USER_NAME"
   # creates the bucket
-  aws s3api create-bucket --bucket $1 --region $REGION --create-bucket-configuration LocationConstraint=$REGION
+  aws s3api create-bucket --bucket $BUCKET_NAME --region $REGION --create-bucket-configuration LocationConstraint=$REGION
   # creates the user
   aws iam create-user --user-name $USER_NAME
   # attaches the policy to the user
@@ -46,9 +46,10 @@ create_environment() {
   #generate credentials for the user
   aws iam create-access-key --user-name $USER_NAME
   # creates the cloudfront distribution
-  sed -e "s/<BUCKET_NAME>/$1/" default_cloudfront.json > $1-cloudfront.json
-  CLOUDFRONT_DISTRIBUTION_ID=`aws cloudfront create-distribution --distribution-config file://$1-cloudfront.json | jq '.Distribution.Id'`
-  #rm $1-cloudfront.json
+  CLOUDFRONT_CONFIG = $BUCKET_NAME-cloudfront.json
+  sed -e "s/<BUCKET_NAME>/$BUCKET_NAME/" default_cloudfront.json > $CLOUDFRONT_CONFIG
+  CLOUDFRONT_DISTRIBUTION_ID=`aws cloudfront create-distribution --distribution-config file://$CLOUDFRONT_CONFIG | jq '.Distribution.Id'`
+  rm $CLOUDFRONT_CONFIG
 }
 
 create_environments() {
@@ -60,12 +61,12 @@ create_environments() {
   done
 }
 
-OLD_PROFILE=$AWS_DEFAULT_PROFILE
-export AWS_DEFAULT_PROFILE=$PROFILE
+OLD_AWS_PROFILE=$AWS_DEFAULT_PROFILE
+export AWS_DEFAULT_PROFILE=$AWS_PROFILE_CHOOSE
 
 check_jq
 check_params
 create_policy
 create_environments
 
-export AWS_DEFAULT_PROFILE=$OLD_PROFILE
+export AWS_DEFAULT_PROFILE=$OLD_AWS_PROFILE
