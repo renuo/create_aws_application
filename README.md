@@ -1,4 +1,4 @@
-# Amazon Create Application
+
 
 Creates a series of buckets on Amazon S3 which follow the Renuo Standard Flow.
 

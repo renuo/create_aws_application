@@ -1,0 +1,72 @@
+#!/bin/sh
+# this is the name of the application you want to create
+NAME=$1
+# these are all the environments. the buckets will be named NAME-ENVIRONMENT
+ENVIRONMENTS=(master develop testing)
+# region where you want to create the bucket
+REGION=eu-central-1
+# aws-cli profile to use (default default)
+AWS_PROFILE_CHOOSE=${2:-default}
+# policy name (default UserBucketFullControl)
+USERS_POLICY_NAME=${3:-UserBucketFullControl}
+
+check_jq() {
+  command -v jq >/dev/null 2>&1 || { echo "I require jq but it's not installed.  Aborting." >&2; exit 1; }
+}
+
+check_params() {
+  if [ "$NAME" = "" ]
+  then
+    echo "Usage: $0 <name of the application to create> [aws profile to use] [policy name]"
+    exit 1
+  fi
+}
+
+# create policy
+create_policy() {
+  if aws iam list-policies --scope=Local | grep -q $USERS_POLICY_NAME; then
+    echo "Found a Policy already called $USERS_POLICY_NAME. This one will be used."
+  else
+    echo "Creating a Policy"
+    aws iam create-policy --policy-name $USERS_POLICY_NAME --policy-document file://default_policy | jq '.Arn'
+  fi
+  POLICY_ARN=`aws iam list-policies --scope=Local | jq --arg pn $USERS_POLICY_NAME '.Policies[] | select(.PolicyName==$pn) | .Arn' | tr -d '"'`
+  echo $POLICY_ARN
+}
+
+create_environment() {
+  BUCKET_NAME=$1
+  USER_NAME=$1
+  # creates the bucket
+  aws s3api create-bucket --bucket $BUCKET_NAME --region $REGION --create-bucket-configuration LocationConstraint=$REGION
+  # creates the user
+  aws iam create-user --user-name $USER_NAME
+  # attaches the policy to the user
+  aws iam attach-user-policy --policy-arn $POLICY_ARN --user-name $USER_NAME
+  #generate credentials for the user
+  aws iam create-access-key --user-name $USER_NAME
+  # creates the cloudfront distribution
+  CLOUDFRONT_CONFIG = $BUCKET_NAME-cloudfront.json
+  sed -e "s/<BUCKET_NAME>/$BUCKET_NAME/" default_cloudfront.json > $CLOUDFRONT_CONFIG
+  CLOUDFRONT_DISTRIBUTION_ID=`aws cloudfront create-distribution --distribution-config file://$CLOUDFRONT_CONFIG | jq '.Distribution.Id'`
+  rm $CLOUDFRONT_CONFIG
+}
+
+create_environments() {
+  for var in "${ENVIRONMENTS[@]}"
+  do
+    BUCKET_NAME=$NAME-$var 
+    echo "creating $BUCKET_NAME..."
+    create_environment $BUCKET_NAME
+  done
+}
+
+OLD_AWS_PROFILE=$AWS_DEFAULT_PROFILE
+export AWS_DEFAULT_PROFILE=$AWS_PROFILE_CHOOSE
+
+check_jq
+check_params
+create_policy
+create_environments
+
+export AWS_DEFAULT_PROFILE=$OLD_AWS_PROFILE
